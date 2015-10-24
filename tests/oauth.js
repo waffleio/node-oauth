@@ -16,11 +16,8 @@ var DummyRequest =function( response ) {
   this.response=  response;
 }
 DummyRequest.prototype= events.EventEmitter.prototype;
-DummyRequest.prototype.write= function(post_body){}
-DummyRequest.prototype.write= function(post_body){
-  this.emit('response',this.response);
-}
 DummyRequest.prototype.end= function(){
+  this.emit('response',this.response);
   this.response.emit('end');
 }
 
@@ -68,9 +65,9 @@ vows.describe('OAuth').addBatch({
         'we get a valid oauth signature': function (oa) {
             var signatureBase = "GET&http%3A%2F%2Fphotos.example.net%2Fphotos&file%3Dvacation.jpg%26oauth_consumer_key%3Ddpf43f3p2l4k3l03%26oauth_nonce%3Dkllo9940pd9333jh%26oauth_signature_method%3DRSA-SHA1%26oauth_timestamp%3D1191242096%26oauth_token%3Dnnch734d00sl2jdk%26oauth_version%3D1.0%26size%3Doriginal";
             var oauthSignature = oa._createSignature(signatureBase, "xyz4992k83j47x0b");
-            
+
             assert.equal( oauthSignature, "qS4rhWog7GPgo4ZCJvUdC/1ZAax/Q4Ab9yOBvgxSopvmKUKp5rso+Zda46GbyN2hnYDTiA/g3P/d/YiPWa454BEBb/KWFV83HpLDIoqUUhJnlXX9MqRQQac0oeope4fWbGlfTdL2PXjSFJmvfrzybERD/ZufsFtVrQKS3QBpYiw=");
-            
+
             //now check that given the public key we can verify this signature
             var verifier = crypto.createVerify("RSA-SHA1").update(signatureBase);
             var valid = verifier.verify(RsaPublicKey, oauthSignature, 'base64');
@@ -258,10 +255,10 @@ vows.describe('OAuth').addBatch({
           var oa= new OAuth(null, null, null, null, null, null, "HMAC-SHA1"),
           mockProvider= {};
 
-          oa._createClient= function( port, hostname, method, path, headers, sshEnabled ) {
+          oa._createClient= function( parsedUrl, method, headers, post_body ) {
             assert.equal(headers.Host, "somehost.com:8080");
-            assert.equal(hostname, "somehost.com");
-            assert.equal(port, "8080");
+            assert.equal(parsedUrl.hostname, "somehost.com");
+            assert.equal(parsedUrl.port, "8080");
             return {
               on: function() {},
               end: function() {}
@@ -312,33 +309,6 @@ vows.describe('OAuth').addBatch({
        Array.prototype.toString = _toString;
       }
     },
-    'When performing the Secure Request' : {
-      topic: new OAuth("http://foo.com/RequestToken",
-                       "http://foo.com/AccessToken",
-                       "anonymous",  "anonymous",
-                       "1.0A", "http://foo.com/callback", "HMAC-SHA1"),
-      'using the POST method' : {
-        'Any passed extra_params should form part of the POST body': function(oa) {
-          var post_body_written= false;
-          var op= oa._createClient;
-          try {
-            oa._createClient= function( port, hostname, method, path, headers, sshEnabled ) {
-              return {
-                write: function(post_body){
-                  post_body_written= true;
-                  assert.equal(post_body,"scope=foobar%2C1%2C2");
-                }
-              };
-            }
-            oa._performSecureRequest("token", "token_secret", 'POST', 'http://foo.com/protected_resource', {"scope": "foobar,1,2"});
-            assert.equal(post_body_written, true);
-          }
-          finally {
-            oa._createClient= op;
-          }
-        }
-      }
-    },
     'When performing a secure' : {
       topic: new OAuth("http://foo.com/RequestToken",
                        "http://foo.com/AccessToken",
@@ -358,7 +328,7 @@ vows.describe('OAuth').addBatch({
             var callbackCalled= false;
             var op= oa._createClient;
             try {
-              oa._createClient= function( port, hostname, method, path, headers, sshEnabled ) {
+              oa._createClient= function( parsedUrl, method, headers, post_body ) {
                 return {
                   write: function(){},
                   on: function() {},
@@ -375,166 +345,7 @@ vows.describe('OAuth').addBatch({
               oa._createClient= op;
             }
           }
-        },
-        'if the post_body is a buffer' : {
-          "It should be passed through as is, and the original content-type (if specified) should be passed through": function(oa) {
-            var op= oa._createClient;
-            try {
-              var callbackCalled= false;
-              oa._createClient= function( port, hostname, method, path, headers, sshEnabled ) {
-                assert.equal(headers["Content-Type"], "image/jpeg")
-                return {
-                  write: function(data){
-                    callbackCalled= true;
-                    assert.equal(data.length, 4);
-                  },
-                  on: function() {},
-                  end: function() {
-                  }
-                };
-              }
-              var request= oa.post("http://foo.com/blah", "token", "token_secret", new Buffer([10,20,30,40]), "image/jpeg")
-              assert.equal(callbackCalled, true);
-            }
-            finally {
-              oa._createClient= op;
-            }
-          },
-          "It should be passed through as is, and no content-type is specified.": function(oa) {
-            //Should probably actually set application/octet-stream, but to avoid a change in behaviour
-            // will just document (here) that the library will set it to application/x-www-form-urlencoded
-            var op= oa._createClient;
-            try {
-              var callbackCalled= false;
-              oa._createClient= function( port, hostname, method, path, headers, sshEnabled ) {
-                assert.equal(headers["Content-Type"], "application/x-www-form-urlencoded")
-                return {
-                  write: function(data){
-                    callbackCalled= true;
-                    assert.equal(data.length, 4);
-                  },
-                  on: function() {},
-                  end: function() {
-                  }
-                };
-              }
-              var request= oa.post("http://foo.com/blah", "token", "token_secret", new Buffer([10,20,30,40]))
-              assert.equal(callbackCalled, true);
-            }
-            finally {
-              oa._createClient= op;
-            }
-          }
-        },
-        'if the post_body is not a string or a buffer' : {
-          "It should be url encoded and the content type set to be x-www-form-urlencoded" : function(oa) {
-            var op= oa._createClient;
-            try {
-              var callbackCalled= false;
-              oa._createClient= function( port, hostname, method, path, headers, sshEnabled ) {
-                assert.equal(headers["Content-Type"], "application/x-www-form-urlencoded")
-                return {
-                  write: function(data){
-                    callbackCalled= true;
-                    assert.equal(data, "foo=1%2C2%2C3&bar=1%2B2");
-                  },
-                  on: function() {},
-                  end: function() {
-                  }
-                };
-              }
-              var request= oa.post("http://foo.com/blah", "token", "token_secret", {"foo":"1,2,3", "bar":"1+2"})
-              assert.equal(callbackCalled, true);
-            }
-            finally {
-              oa._createClient= op;
-            }
-          }
-        },
-        'if the post_body is a string' : {
-          "and it contains non ascii (7/8bit) characters" : {
-           "the content length should be the byte count, and not the string length"  : function(oa) {
-             var testString= "Tôi yêu node";
-             var testStringLength= testString.length;
-             var testStringBytesLength= Buffer.byteLength(testString);
-             assert.notEqual(testStringLength, testStringBytesLength); // Make sure we're testing a string that differs between byte-length and char-length!
-
-             var op= oa._createClient;
-             try {
-               var callbackCalled= false;
-               oa._createClient= function( port, hostname, method, path, headers, sshEnabled ) {
-                 assert.equal(headers["Content-length"], testStringBytesLength);
-                 return {
-                   write: function(data){
-                     callbackCalled= true;
-                     assert.equal(data, testString);
-                   },
-                   on: function() {},
-                   end: function() {
-                   }
-                 };
-                }
-                var request= oa.post("http://foo.com/blah", "token", "token_secret", "Tôi yêu node")
-                assert.equal(callbackCalled, true);
-              }
-              finally {
-                oa._createClient= op;
-              }
-           }
-          },
-          "and no post_content_type is specified" : {
-            "It should be written as is, with a content length specified, and the encoding should be set to be x-www-form-urlencoded" : function(oa) {
-              var op= oa._createClient;
-              try {
-                var callbackCalled= false;
-                oa._createClient= function( port, hostname, method, path, headers, sshEnabled ) {
-                  assert.equal(headers["Content-Type"], "application/x-www-form-urlencoded");
-                  assert.equal(headers["Content-length"], 23);
-                  return {
-                    write: function(data){
-                      callbackCalled= true;
-                      assert.equal(data, "foo=1%2C2%2C3&bar=1%2B2");
-                    },
-                    on: function() {},
-                    end: function() {
-                    }
-                  };
-                 }
-                 var request= oa.post("http://foo.com/blah", "token", "token_secret", "foo=1%2C2%2C3&bar=1%2B2")
-                 assert.equal(callbackCalled, true);
-               }
-               finally {
-                 oa._createClient= op;
-               }
-             }
-           },
-           "and a post_content_type is specified" : {
-             "It should be written as is, with a content length specified, and the encoding should be set to be as specified" : function(oa) {
-               var op= oa._createClient;
-               try {
-                 var callbackCalled= false;
-                 oa._createClient= function( port, hostname, method, path, headers, sshEnabled ) {
-                   assert.equal(headers["Content-Type"], "unicorn/encoded");
-                   assert.equal(headers["Content-length"], 23);
-                   return {
-                     write: function(data){
-                       callbackCalled= true;
-                       assert.equal(data, "foo=1%2C2%2C3&bar=1%2B2");
-                     },
-                     on: function() {},
-                     end: function() {
-                     }
-                   };
-                  }
-                 var request= oa.post("http://foo.com/blah", "token", "token_secret", "foo=1%2C2%2C3&bar=1%2B2", "unicorn/encoded")
-                 assert.equal(callbackCalled, true);
-               }
-               finally {
-                 oa._createClient= op;
-               }
-             }
-           }
-         }
+        }
        },
        'GET' : {
          'if no callback is passed' : {
@@ -550,7 +361,7 @@ vows.describe('OAuth').addBatch({
              var callbackCalled= false;
              var op= oa._createClient;
              try {
-               oa._createClient= function( port, hostname, method, path, headers, sshEnabled ) {
+               oa._createClient= function( parsedUrl, method, headers, post_body ) {
                  return {
                    on: function() {},
                    end: function() {
@@ -582,19 +393,16 @@ vows.describe('OAuth').addBatch({
              var callbackCalled= 0;
              var op= oa._createClient;
              try {
-               oa._createClient= function( port, hostname, method, path, headers, sshEnabled ) {
+               oa._createClient= function( parsedUrl, method, headers, post_body ) {
                  return {
                    on: function() {},
-                   write: function(data) {
-                     callbackCalled++;
-                   },
                    end: function() {
                      callbackCalled++;
                    }
                  };
                }
                var request= oa.put("http://foo.com/blah", "token", "token_secret", "BLAH", "text/plain", function(e,d){})
-               assert.equal(callbackCalled, 2);
+               assert.equal(callbackCalled, 1);
                assert.isUndefined(request);
              }
              finally {
@@ -602,126 +410,6 @@ vows.describe('OAuth').addBatch({
              }
            }
          },
-         'if the post_body is a buffer' : {
-           "It should be passed through as is, and the original content-type (if specified) should be passed through": function(oa) {
-             var op= oa._createClient;
-             try {
-               var callbackCalled= false;
-               oa._createClient= function( port, hostname, method, path, headers, sshEnabled ) {
-                 assert.equal(headers["Content-Type"], "image/jpeg")
-                 return {
-                   write: function(data){
-                     callbackCalled= true;
-                     assert.equal(data.length, 4);
-                   },
-                   on: function() {},
-                   end: function() {
-                   }
-                 };
-               }
-               var request= oa.put("http://foo.com/blah", "token", "token_secret", new Buffer([10,20,30,40]), "image/jpeg")
-               assert.equal(callbackCalled, true);
-             }
-             finally {
-               oa._createClient= op;
-             }
-           },
-           "It should be passed through as is, and no content-type is specified.": function(oa) {
-             //Should probably actually set application/octet-stream, but to avoid a change in behaviour
-             // will just document (here) that the library will set it to application/x-www-form-urlencoded
-             var op= oa._createClient;
-             try {
-               var callbackCalled= false;
-               oa._createClient= function( port, hostname, method, path, headers, sshEnabled ) {
-                 assert.equal(headers["Content-Type"], "application/x-www-form-urlencoded")
-                 return {
-                   write: function(data){
-                     callbackCalled= true;
-                     assert.equal(data.length, 4);
-                   },
-                   on: function() {},
-                   end: function() {
-                   }
-                 };
-               }
-               var request= oa.put("http://foo.com/blah", "token", "token_secret", new Buffer([10,20,30,40]))
-               assert.equal(callbackCalled, true);
-             }
-             finally {
-               oa._createClient= op;
-             }
-           }
-         },
-         'if the post_body is not a string' : {
-           "It should be url encoded and the content type set to be x-www-form-urlencoded" : function(oa) {
-             var op= oa._createClient;
-             try {
-               var callbackCalled= false;
-               oa._createClient= function( port, hostname, method, path, headers, sshEnabled ) {
-                 assert.equal(headers["Content-Type"], "application/x-www-form-urlencoded")
-                 return {
-                   write: function(data) {
-                     callbackCalled= true;
-                     assert.equal(data, "foo=1%2C2%2C3&bar=1%2B2");
-                   }
-                 };
-               }
-               var request= oa.put("http://foo.com/blah", "token", "token_secret", {"foo":"1,2,3", "bar":"1+2"})
-               assert.equal(callbackCalled, true);
-             }
-             finally {
-               oa._createClient= op;
-             }
-           }
-         },
-         'if the post_body is a string' : {
-           "and no post_content_type is specified" : {
-             "It should be written as is, with a content length specified, and the encoding should be set to be x-www-form-urlencoded" : function(oa) {
-                var op= oa._createClient;
-                try {
-                  var callbackCalled= false;
-                  oa._createClient= function( port, hostname, method, path, headers, sshEnabled ) {
-                    assert.equal(headers["Content-Type"], "application/x-www-form-urlencoded");
-                    assert.equal(headers["Content-length"], 23);
-                    return {
-                      write: function(data) {
-                        callbackCalled= true;
-                        assert.equal(data, "foo=1%2C2%2C3&bar=1%2B2");
-                      }
-                    };
-                  }
-                  var request= oa.put("http://foo.com/blah", "token", "token_secret", "foo=1%2C2%2C3&bar=1%2B2")
-                  assert.equal(callbackCalled, true);
-                }
-                finally {
-                  oa._createClient= op;
-                }
-              }
-            },
-            "and a post_content_type is specified" : {
-              "It should be written as is, with a content length specified, and the encoding should be set to be as specified" : function(oa) {
-                var op= oa._createClient;
-                try {
-                  var callbackCalled= false;
-                  oa._createClient= function( port, hostname, method, path, headers, sshEnabled ) {
-                    assert.equal(headers["Content-Type"], "unicorn/encoded");
-                    assert.equal(headers["Content-length"], 23);
-                    return {
-                      write: function(data) {
-                         callbackCalled= true;
-                         assert.equal(data, "foo=1%2C2%2C3&bar=1%2B2");
-                       }
-                    };
-                  }
-                  var request= oa.put("http://foo.com/blah", "token", "token_secret", "foo=1%2C2%2C3&bar=1%2B2", "unicorn/encoded")
-                  assert.equal(callbackCalled, true);
-                }
-                finally {
-                  oa._createClient= op;
-                }
-              }
-            }
-          }
         },
        'DELETE' : {
          'if no callback is passed' : {
@@ -737,7 +425,7 @@ vows.describe('OAuth').addBatch({
              var callbackCalled= false;
              var op= oa._createClient;
              try {
-               oa._createClient= function( port, hostname, method, path, headers, sshEnabled ) {
+               oa._createClient= function( parsedUrl, method, headers, post_body ) {
                  return {
                    on: function() {},
                    end: function() {
@@ -761,7 +449,7 @@ vows.describe('OAuth').addBatch({
               var op= oa._createClient;
               var callbackCalled = false;
               try {
-                oa._createClient= function( port, hostname, method, path, headers, sshEnabled ) {
+                oa._createClient= function( parsedUrl, method, headers, post_body ) {
                   return new DummyRequest( new DummyResponse(200) );
                 }
                 oa._performSecureRequest("token", "token_secret", 'POST', 'http://originalurl.com', {"scope": "foobar,1,2"}, null, null, function(error) {
@@ -781,7 +469,7 @@ vows.describe('OAuth').addBatch({
               var op= oa._createClient;
               var callbackCalled = false;
               try {
-                oa._createClient= function( port, hostname, method, path, headers, sshEnabled ) {
+                oa._createClient= function( parsedUrl, method, headers, post_body ) {
                   return new DummyRequest( new DummyResponse(210) );
                 }
                 oa._performSecureRequest("token", "token_secret", 'POST', 'http://originalurl.com', {"scope": "foobar,1,2"}, null, null, function(error) {
@@ -796,286 +484,6 @@ vows.describe('OAuth').addBatch({
               }
             }
           },
-          'And A 301 redirect is received' : {
-              'and there is a location header' : {
-                'it should (re)perform the secure request but with the new location' : function(oa) {
-                  var op= oa._createClient;
-                  var psr= oa._performSecureRequest;
-                  var responseCounter = 1;
-                  var callbackCalled = false;
-                  var DummyResponse =function() {
-                    if( responseCounter == 1 ){
-                      this.statusCode= 301;
-                      this.headers= {location:"http://redirectto.com"};
-                      responseCounter++;
-                    }
-                    else {
-                      this.statusCode= 200;
-                    }
-                  }
-                  DummyResponse.prototype= events.EventEmitter.prototype;
-                  DummyResponse.prototype.setEncoding= function() {}
-
-                  try {
-                    oa._createClient= function( port, hostname, method, path, headers, sshEnabled ) {
-                      return new DummyRequest( new DummyResponse() );
-                    }
-                    oa._performSecureRequest= function( oauth_token, oauth_token_secret, method, url, extra_params, post_body, post_content_type,  callback ) {
-                      if( responseCounter == 1 ) {
-                        assert.equal(url, "http://originalurl.com");
-                      }
-                      else {
-                        assert.equal(url, "http://redirectto.com");
-                      }
-                      return psr.call(oa, oauth_token, oauth_token_secret, method, url, extra_params, post_body, post_content_type,  callback )
-                    }
-
-                    oa._performSecureRequest("token", "token_secret", 'POST', 'http://originalurl.com', {"scope": "foobar,1,2"}, null, null, function() {
-                      // callback
-                      assert.equal(responseCounter, 2);
-                      callbackCalled= true;
-                    });
-                    assert.equal(callbackCalled, true)
-                  }
-                  finally {
-                    oa._createClient= op;
-                    oa._performSecureRequest= psr;
-                  }
-                }
-              },
-              'but there is no location header' : {
-                'it should execute the callback, passing the HTTP Response code' : function(oa) {
-                  var op= oa._createClient;
-                  var callbackCalled = false;
-                  try {
-                    oa._createClient= function( port, hostname, method, path, headers, sshEnabled ) {
-                      return new DummyRequest( new DummyResponse(301) );
-                    }
-                    oa._performSecureRequest("token", "token_secret", 'POST', 'http://originalurl.com', {"scope": "foobar,1,2"}, null, null, function(error) {
-                      // callback
-                      assert.equal(error.statusCode, 301);
-                      callbackCalled= true;
-                    });
-                    assert.equal(callbackCalled, true)
-                  }
-                  finally {
-                    oa._createClient= op;
-                  }
-                }
-              },
-              'and followRedirect is true' : {
-                'it should (re)perform the secure request but with the new location' : function(oa) {
-                  var op= oa._createClient;
-                  var psr= oa._performSecureRequest;
-                  var responseCounter = 1;
-                  var callbackCalled = false;
-                  var DummyResponse =function() {
-                    if( responseCounter == 1 ){
-                      this.statusCode= 301;
-                      this.headers= {location:"http://redirectto.com"};
-                      responseCounter++;
-                    }
-                    else {
-                      this.statusCode= 200;
-                    }
-                  }
-                  DummyResponse.prototype= events.EventEmitter.prototype;
-                  DummyResponse.prototype.setEncoding= function() {}
-
-                  try {
-                    oa._createClient= function( port, hostname, method, path, headers, sshEnabled ) {
-                      return new DummyRequest( new DummyResponse() );
-                    }
-                    oa._performSecureRequest= function( oauth_token, oauth_token_secret, method, url, extra_params, post_body, post_content_type,  callback ) {
-                      if( responseCounter == 1 ) {
-                        assert.equal(url, "http://originalurl.com");
-                      }
-                      else {
-                        assert.equal(url, "http://redirectto.com");
-                      }
-                      return psr.call(oa, oauth_token, oauth_token_secret, method, url, extra_params, post_body, post_content_type,  callback )
-                    }
-
-                    oa._performSecureRequest("token", "token_secret", 'POST', 'http://originalurl.com', {"scope": "foobar,1,2"}, null, null, function() {
-                      // callback
-                      assert.equal(responseCounter, 2);
-                      callbackCalled= true;
-                    });
-                    assert.equal(callbackCalled, true)
-                  }
-                  finally {
-                    oa._createClient= op;
-                    oa._performSecureRequest= psr;
-                  }
-                }
-              },
-              'and followRedirect is false' : {
-                'it should not perform the secure request with the new location' : function(oa) {
-                  var op= oa._createClient;
-                  oa.setClientOptions({ followRedirects: false });
-                  var DummyResponse =function() {
-                      this.statusCode= 301;
-                      this.headers= {location:"http://redirectto.com"};
-                  }
-                  DummyResponse.prototype= events.EventEmitter.prototype;
-                  DummyResponse.prototype.setEncoding= function() {}
-
-                  try {
-                    oa._createClient= function( port, hostname, method, path, headers, sshEnabled ) {
-                      return new DummyRequest( new DummyResponse() );
-                    }
-                    oa._performSecureRequest("token", "token_secret", 'POST', 'http://originalurl.com', {"scope": "foobar,1,2"}, null, null, function(res, data, response) {
-                      // callback
-                      assert.equal(res.statusCode, 301);
-                    });
-                  }
-                  finally {
-                    oa._createClient= op;
-                    oa.setClientOptions({followRedirects:true});
-                  }
-                }
-              }
-            },
-          'And A 302 redirect is received' : {
-            'and there is a location header' : {
-              'it should (re)perform the secure request but with the new location' : function(oa) {
-                var op= oa._createClient;
-                var psr= oa._performSecureRequest;
-                var responseCounter = 1;
-                var callbackCalled = false;
-                var DummyResponse =function() {
-                  if( responseCounter == 1 ){
-                    this.statusCode= 302;
-                    this.headers= {location:"http://redirectto.com"};
-                    responseCounter++;
-                  }
-                  else {
-                    this.statusCode= 200;
-                  }
-                }
-                DummyResponse.prototype= events.EventEmitter.prototype;
-                DummyResponse.prototype.setEncoding= function() {}
-
-                try {
-                  oa._createClient= function( port, hostname, method, path, headers, sshEnabled ) {
-                    return new DummyRequest( new DummyResponse() );
-                  }
-                  oa._performSecureRequest= function( oauth_token, oauth_token_secret, method, url, extra_params, post_body, post_content_type,  callback ) {
-                    if( responseCounter == 1 ) {
-                      assert.equal(url, "http://originalurl.com");
-                    }
-                    else {
-                      assert.equal(url, "http://redirectto.com");
-                    }
-                    return psr.call(oa, oauth_token, oauth_token_secret, method, url, extra_params, post_body, post_content_type,  callback )
-                  }
-
-                  oa._performSecureRequest("token", "token_secret", 'POST', 'http://originalurl.com', {"scope": "foobar,1,2"}, null, null, function() {
-                    // callback
-                    assert.equal(responseCounter, 2);
-                    callbackCalled= true;
-                  });
-                  assert.equal(callbackCalled, true)
-                }
-                finally {
-                  oa._createClient= op;
-                  oa._performSecureRequest= psr;
-                }
-              }
-            },
-            'but there is no location header' : {
-              'it should execute the callback, passing the HTTP Response code' : function(oa) {
-                var op= oa._createClient;
-                var callbackCalled = false;
-                try {
-                  oa._createClient= function( port, hostname, method, path, headers, sshEnabled ) {
-                    return new DummyRequest( new DummyResponse(302) );
-                  }
-                  oa._performSecureRequest("token", "token_secret", 'POST', 'http://originalurl.com', {"scope": "foobar,1,2"}, null, null, function(error) {
-                    // callback
-                    assert.equal(error.statusCode, 302);
-                    callbackCalled= true;
-                  });
-                  assert.equal(callbackCalled, true)
-                }
-                finally {
-                  oa._createClient= op;
-                }
-              }
-            },
-            'and followRedirect is true' : {
-                'it should (re)perform the secure request but with the new location' : function(oa) {
-                  var op= oa._createClient;
-                  var psr= oa._performSecureRequest;
-                  var responseCounter = 1;
-                  var callbackCalled = false;
-                  var DummyResponse =function() {
-                    if( responseCounter == 1 ){
-                      this.statusCode= 302;
-                      this.headers= {location:"http://redirectto.com"};
-                      responseCounter++;
-                    }
-                    else {
-                      this.statusCode= 200;
-                    }
-                  }
-                  DummyResponse.prototype= events.EventEmitter.prototype;
-                  DummyResponse.prototype.setEncoding= function() {}
-
-                  try {
-                    oa._createClient= function( port, hostname, method, path, headers, sshEnabled ) {
-                      return new DummyRequest( new DummyResponse() );
-                    }
-                    oa._performSecureRequest= function( oauth_token, oauth_token_secret, method, url, extra_params, post_body, post_content_type,  callback ) {
-                      if( responseCounter == 1 ) {
-                        assert.equal(url, "http://originalurl.com");
-                      }
-                      else {
-                        assert.equal(url, "http://redirectto.com");
-                      }
-                      return psr.call(oa, oauth_token, oauth_token_secret, method, url, extra_params, post_body, post_content_type,  callback )
-                    }
-
-                    oa._performSecureRequest("token", "token_secret", 'POST', 'http://originalurl.com', {"scope": "foobar,1,2"}, null, null, function() {
-                      // callback
-                      assert.equal(responseCounter, 2);
-                      callbackCalled= true;
-                    });
-                    assert.equal(callbackCalled, true)
-                  }
-                  finally {
-                    oa._createClient= op;
-                    oa._performSecureRequest= psr;
-                  }
-                }
-              },
-              'and followRedirect is false' : {
-                'it should not perform the secure request with the new location' : function(oa) {
-                  var op= oa._createClient;
-                  oa.setClientOptions({ followRedirects: false });
-                  var DummyResponse =function() {
-                      this.statusCode= 302;
-                      this.headers= {location:"http://redirectto.com"};
-                  }
-                  DummyResponse.prototype= events.EventEmitter.prototype;
-                  DummyResponse.prototype.setEncoding= function() {}
-
-                  try {
-                    oa._createClient= function( port, hostname, method, path, headers, sshEnabled ) {
-                      return new DummyRequest( new DummyResponse() );
-                    }
-                    oa._performSecureRequest("token", "token_secret", 'POST', 'http://originalurl.com', {"scope": "foobar,1,2"}, null, null, function(res, data, response) {
-                      // callback
-                      assert.equal(res.statusCode, 302);
-                    });
-                  }
-                  finally {
-                    oa._createClient= op;
-                    oa.setClientOptions({followRedirects:true});
-                  }
-                }
-              }
-          }
        }
      }
 }).export(module);
